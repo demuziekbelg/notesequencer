@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kleurrijke Note Sequencer</title>
+  <style>
+    :root{
+      --bg:#f8fafc;           /* zacht grijs-blauw */
+      --ink:#0f172a;          /* donkerblauw */
+      --muted:#e2e8f0;        /* lichtgrijs */
+      --accent:#22c55e;       /* groene accentkleur */
+      --playhead: #94a3b8;    /* slate-400 */
+      --cell-size: 44px;      /* basis celgrootte */
+      --radius: 14px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;}
+    body{
+      margin:0; background:var(--bg); color:var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      display:flex; flex-direction:column; gap:16px;
+    }
+    header{
+      padding:16px clamp(12px, 4vw, 28px);
+      display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;
+    }
+    .title{
+      display:flex; align-items:center; gap:12px;
+    }
+    .logo{width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,#60a5fa,#f472b6,#22c55e); box-shadow:0 6px 16px rgba(0,0,0,.12)}
+    h1{font-size:clamp(18px, 2.6vw, 26px); margin:0}
+
+    .controls{
+      display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+    }
+    .control{background:white; border:1px solid var(--muted); border-radius:10px; padding:8px 10px; display:flex; align-items:center; gap:8px; box-shadow:0 2px 10px rgba(15,23,42,.06)}
+    label{font-size:12px; opacity:.9}
+    select, input[type="number"], input[type="text"], .btn { 
+      font: inherit; color:inherit; border:1px solid var(--muted); background:white; border-radius:10px; padding:6px 10px; 
+    }
+    select{cursor:pointer}
+    .btn{cursor:pointer; border:none; padding:8px 14px; background:var(--ink); color:white; border-radius:12px; box-shadow:0 6px 16px rgba(15,23,42,.2)}
+    .btn.secondary{ background:white; color:var(--ink); border:1px solid var(--muted)}
+    .btn:active{ transform:translateY(1px) }
+
+    /* Grid area */
+    .stage{
+      background:white; margin:0 clamp(12px, 4vw, 28px) 24px; border:1px solid var(--muted); border-radius:var(--radius); overflow:hidden;
+      box-shadow:0 20px 40px rgba(15,23,42,.07)
+    }
+    .ruler{
+      display:grid; grid-template-columns: auto 1fr; align-items:center; border-bottom:1px dashed var(--muted); background:#f9fafb;
+    }
+    .ruler .left { padding:10px 10px 10px 14px; font-size:12px; opacity:.7 }
+    .ruler .ticks{ display:flex; gap:0; }
+    .tick{ flex:1 0 auto; text-align:center; font-size:12px; padding:6px 0; border-left:1px dashed var(--muted) }
+    .tick:first-child{ border-left:none }
+
+    .grid-wrap{ display:grid; grid-template-columns: auto 1fr; }
+    .row-labels{ display:flex; flex-direction:column; }
+    .row-label{ height:var(--cell-size); display:flex; align-items:center; justify-content:flex-start; gap:8px; padding-left:10px; border-bottom:1px dashed var(--muted); font-weight:600; }
+    .swatch{ width:18px; height:18px; border-radius:6px; box-shadow: inset 0 0 0 2px rgba(0,0,0,.08)}
+
+    .grid{ overflow:auto; }
+    .cells{ display:grid; grid-auto-rows: var(--cell-size); }
+    .cell{
+      width: var(--cell-size); height: var(--cell-size);
+      border-right:1px solid #eef2f7; border-bottom:1px dashed var(--muted);
+      display:flex; align-items:center; justify-content:center; cursor:pointer;
+      transition: transform .06s ease, box-shadow .1s ease;
+      position:relative;
+    }
+    .cell:hover{ transform:scale(1.035) }
+    .cell::after{ content:""; position:absolute; inset:6px; border-radius:12px; background:#f3f4f6; opacity:.6; }
+    .cell.active::after{ background:var(--active-color); opacity:1; box-shadow: 0 6px 16px rgba(0,0,0,.15) }
+    .cell.playing::before{ content:""; position:absolute; inset:-1px; border-right: 3px solid var(--playhead); }
+
+    .footer{
+      padding:14px clamp(12px, 4vw, 28px) 24px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;
+    }
+    .linkbox{ display:flex; gap:8px; align-items:center; flex:1; min-width:260px }
+    .linkbox input{ width:100% }
+    .hint{ font-size:12px; opacity:.7 }
+
+    /* Embed mode trims chrome */
+    .embed header, .embed .footer .share, .embed .footer .hint { display:none }
+    .embed .footer{ justify-content:center }
+
+    @media (max-width: 680px){
+      :root{ --cell-size: 36px }
+      .row-label{ font-size:12px }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <div class="logo" aria-hidden="true"></div>
+      <h1>Kleurrijke Note Sequencer</h1>
+    </div>
+    <div class="controls">
+      <div class="control">
+        <label for="subdiv">Onderverdeling:</label>
+        <select id="subdiv">
+          <option value="1">Kwart (1 cel per tel)</option>
+          <option value="2" selected>Achtsten (2 cellen per tel)</option>
+          <option value="4">Zestienden (4 cellen per tel)</option>
+        </select>
+      </div>
+      <div class="control">
+        <label for="tempo">Tempo</label>
+        <input type="range" id="tempo" min="60" max="140" step="1" value="100" />
+        <span id="tempoVal">100 BPM</span>
+      </div>
+      <div class="control">
+        <button id="play" class="btn" aria-pressed="false">▶︎ Afspelen</button>
+        <button id="clear" class="btn secondary">Wissen</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="ruler">
+      <div class="left">Tellen</div>
+      <div id="ticks" class="ticks"></div>
+    </div>
+    <div class="grid-wrap">
+      <div id="labels" class="row-labels"></div>
+      <div class="grid">
+        <div id="cells" class="cells"></div>
+      </div>
+    </div>
+    <div class="footer">
+      <div class="share">
+        <button id="save" class="btn">Link maken</button>
+        <button id="embedBtn" class="btn secondary">Embed-code</button>
+      </div>
+      <div class="linkbox">
+        <input id="linkOut" type="text" placeholder="Je deelbare link verschijnt hier…" readonly />
+        <button id="copy" class="btn secondary">Kopieer</button>
+      </div>
+      <div class="hint">Tip: de link bevat alle gegevens (toonraster, tempo en onderverdeling). Je kunt hem rechtstreeks in Canva als embed gebruiken.</div>
+    </div>
+  </main>
+
+  <!-- Eenvoudige modal voor embed-code -->
+  <dialog id="embedModal" style="border:none;border-radius:16px; padding:0; max-width:720px; width:calc(100% - 24px); box-shadow:0 30px 60px rgba(15,23,42,.3)">
+    <div style="padding:18px 18px 12px; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center">
+      <strong>Embed-code</strong>
+      <button id="embedClose" class="btn secondary">Sluiten</button>
+    </div>
+    <div style="padding:18px; display:grid; gap:8px">
+      <label for="embedCode" style="font-size:12px; opacity:.8">Plak dit in Canva of een website:</label>
+      <textarea id="embedCode" rows="4" style="width:100%; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; border:1px solid #e5e7eb; border-radius:12px; padding:10px"></textarea>
+      <div style="display:flex; gap:8px; justify-content:flex-end">
+        <button id="copyEmbed" class="btn secondary">Kopieer embed</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+  // ====== Muziekschaal (C majeur, 1 octaaf) ======
+  const SCALE = [
+    { name:'B4', midi:71, color:'#8b5cf6' },   // paars
+    { name:'A4', midi:69, color:'#3b82f6' },   // blauw
+    { name:'G4', midi:67, color:'#06b6d4' },   // cyaan
+    { name:'F4', midi:65, color:'#22c55e' },   // groen
+    { name:'E4', midi:64, color:'#eab308' },   // geel
+    { name:'D4', midi:62, color:'#f59e0b' },   // oranje
+    { name:'C4', midi:60, color:'#ef4444' },   // rood
+  ];
+  // NB: bovenste rij = hoogste toon (B4), onderste = laagste (C4), zoals in een pianorol.
+
+  // ====== State ======
+  const beats = 4;                 // 1 maat van 4 tellen
+  let subdiv = 2;                  // standaard: achtsten (2 per tel)
+  let bpm = 100;
+  let cols = beats * subdiv;       // aantal kolommen
+  let rows = SCALE.length;         // 7
+  let grid = makeGrid(rows, cols); // 2D booleans [row][col]
+
+  // ====== DOM refs ======
+  const elSubdiv = document.getElementById('subdiv');
+  const elTempo = document.getElementById('tempo');
+  const elTempoVal = document.getElementById('tempoVal');
+  const elTicks = document.getElementById('ticks');
+  const elLabels = document.getElementById('labels');
+  const elCells = document.getElementById('cells');
+  const elPlay = document.getElementById('play');
+  const elClear = document.getElementById('clear');
+  const elSave = document.getElementById('save');
+  const elLinkOut = document.getElementById('linkOut');
+  const elCopy = document.getElementById('copy');
+  const embedBtn = document.getElementById('embedBtn');
+  const embedModal = document.getElementById('embedModal');
+  const embedClose = document.getElementById('embedClose');
+  const embedCode = document.getElementById('embedCode');
+  const copyEmbed = document.getElementById('copyEmbed');
+
+  // ====== Audio ======
+  let ac;                 // AudioContext
+  const master = { gainNode: null };
+  function ensureAudio(){
+    if(!ac){
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      master.gainNode = ac.createGain();
+      master.gainNode.gain.value = 0.14; // zacht
+      master.gainNode.connect(ac.destination);
+    }
+    if(ac.state === 'suspended') ac.resume();
+  }
+  function midiToFreq(m){ return 440 * Math.pow(2, (m-69)/12); }
+  function blip(midi, when, dur){
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = midiToFreq(midi);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.9, when + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.08, dur));
+    osc.connect(g).connect(master.gainNode);
+    osc.start(when);
+    osc.stop(when + Math.max(0.1, dur + 0.02));
+  }
+
+  // ====== Grid helpers ======
+  function makeGrid(r, c){ return Array.from({length:r}, ()=> Array(c).fill(false)); }
+  function rebuildGrid(){
+    cols = beats * subdiv;
+    grid = makeGrid(rows, cols);
+    drawEverything();
+  }
+
+  // ====== UI builders ======
+  function drawEverything(){
+    // Ruler ticks
+    elTicks.innerHTML = '';
+    for(let b=1; b<=beats; b++){
+      const span = document.createElement('div');
+      span.className='tick';
+      span.textContent = b;
+      span.style.width = `calc((var(--cell-size) * ${subdiv}))`;
+      elTicks.appendChild(span);
+    }
+
+    // Row labels
+    elLabels.innerHTML = '';
+    SCALE.forEach(s => {
+      const lab = document.createElement('div');
+      lab.className='row-label';
+      lab.innerHTML = `<span class="swatch" style="background:${s.color}"></span><span>${s.name}</span>`;
+      elLabels.appendChild(lab);
+    });
+
+    // Cells grid
+    elCells.innerHTML = '';
+    elCells.style.gridTemplateColumns = `repeat(${cols}, var(--cell-size))`;
+    elCells.style.gridTemplateRows = `repeat(${rows}, var(--cell-size))`;
+
+    // Build cells
+    for(let r=0; r<rows; r++){
+      for(let c=0; c<cols; c++){
+        const div = document.createElement('div');
+        div.className = 'cell';
+        div.dataset.r = r; div.dataset.c = c;
+        div.style.setProperty('--active-color', SCALE[r].color);
+        div.addEventListener('click', () => toggleCell(r,c,div));
+        elCells.appendChild(div);
+      }
+    }
+    refreshActiveClasses();
+  }
+
+  function toggleCell(r,c,div){
+    grid[r][c] = !grid[r][c];
+    div.classList.toggle('active', grid[r][c]);
+  }
+  function refreshActiveClasses(){
+    const children = elCells.children;
+    for(let r=0; r<rows; r++){
+      for(let c=0; c<cols; c++){
+        const idx = r*cols + c;
+        const cell = children[idx];
+        if(cell){
+          cell.classList.toggle('active', !!grid[r][c]);
+        }
+      }
+    }
+  }
+
+  // ====== Playback ======
+  let playing = false;
+  let curCol = 0;
+  let timer = null;
+  function msPerCol(){ return (60000 / bpm) / subdiv; }
+  function step(){
+    // Play notes in this column
+    ensureAudio();
+    const now = ac.currentTime;
+    for(let r=0; r<rows; r++){
+      if(grid[r][curCol]){
+        blip(SCALE[r].midi, now, msPerCol()/1000 * 0.85);
+      }
+    }
+    // Visual playhead
+    markPlayhead(curCol);
+    curCol = (curCol + 1) % cols;
+  }
+  function markPlayhead(col){
+    const kids = elCells.children;
+    // Clear previous
+    for(let i=0;i<kids.length;i++) kids[i].classList.remove('playing');
+    // Set new column
+    for(let r=0; r<rows; r++){
+      const idx = r*cols + col;
+      const cell = kids[idx];
+      if(cell) cell.classList.add('playing');
+    }
+  }
+  function start(){
+    if(playing) return;
+    playing = true; curCol = 0;
+    elPlay.textContent = '⏸︎ Stop';
+    elPlay.setAttribute('aria-pressed','true');
+    step();
+    timer = setInterval(step, msPerCol());
+  }
+  function stop(){
+    playing = false;
+    elPlay.textContent = '▶︎ Afspelen';
+    elPlay.setAttribute('aria-pressed','false');
+    clearInterval(timer); timer = null;
+    // Clear playhead visuals
+    const kids = elCells.children; for(let i=0;i<kids.length;i++) kids[i].classList.remove('playing');
+  }
+
+  // ====== Link encoding ======
+  // We pakken het raster als bitstring -> bytes -> base64. Alle metadata in de hash.
+  function encodeToHash(){
+    let bits = '';
+    for(let r=0; r<rows; r++){
+      for(let c=0; c<cols; c++) bits += grid[r][c] ? '1' : '0';
+    }
+    const bytes = [];
+    for(let i=0;i<bits.length;i+=8){
+      const chunk = bits.slice(i,i+8).padEnd(8,'0');
+      bytes.push(parseInt(chunk,2));
+    }
+    const bin = String.fromCharCode(...bytes);
+    const b64 = btoa(bin);
+    const params = new URLSearchParams({ v:'1', sub: String(subdiv), beats: String(beats), tempo: String(bpm), data: b64 });
+    // embed=1 wordt apart gezet indien gewenst
+    return '#' + params.toString();
+  }
+  function decodeFromHash(hash){
+    const h = (hash || location.hash || '').replace(/^#/,'');
+    if(!h) return false;
+    const u = new URLSearchParams(h);
+    const v = u.get('v'); if(v !== '1') {/* future-proof */}
+    subdiv = clamp(parseInt(u.get('sub')||'2',10),1,8);
+    bpm = clamp(parseInt(u.get('tempo')||'100',10),40,220);
+    const b64 = u.get('data');
+    const beatParam = parseInt(u.get('beats')||'4',10);
+    // rebuild grid to match incoming settings
+    const newCols = (beatParam * subdiv);
+    cols = newCols; // keep local in sync
+    grid = makeGrid(rows, cols);
+
+    if(b64){
+      try{
+        const bin = atob(b64);
+        let bits = '';
+        for(let i=0;i<bin.length;i++){
+          const byte = bin.charCodeAt(i);
+          bits += byte.toString(2).padStart(8,'0');
+        }
+        // fill grid with available bits
+        let k=0;
+        for(let r=0; r<rows; r++){
+          for(let c=0; c<cols; c++){
+            grid[r][c] = bits[k++] === '1';
+          }
+        }
+      }catch(e){ console.warn('Kon link niet decoderen:', e); }
+    }
+
+    // reflect UI
+    elSubdiv.value = String(subdiv);
+    elTempo.value = String(bpm);
+    elTempoVal.textContent = bpm + ' BPM';
+    drawEverything();
+    if(u.get('embed') === '1') document.body.classList.add('embed');
+    else document.body.classList.remove('embed');
+    return true;
+  }
+  function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+
+  // ====== Events ======
+  elSubdiv.addEventListener('change', () => {
+    const newSub = parseInt(elSubdiv.value,10);
+    const oldCols = cols;
+    subdiv = newSub; cols = beats * subdiv;
+    // Probeer bestaand patroon redelijk te schalen naar nieuwe kolommen
+    const newGrid = makeGrid(rows, cols);
+    for(let r=0; r<rows; r++){
+      for(let c=0; c<oldCols; c++){
+        if(grid[r][c]){
+          const mapped = Math.floor(c * cols / oldCols);
+          newGrid[r][mapped] = true;
+        }
+      }
+    }
+    grid = newGrid;
+    drawEverything();
+    if(playing){ clearInterval(timer); timer = setInterval(step, msPerCol()); }
+    // update link preview live
+    elLinkOut.value = makeFullLink(false);
+  });
+  elTempo.addEventListener('input', () => {
+    bpm = parseInt(elTempo.value,10);
+    elTempoVal.textContent = bpm + ' BPM';
+    if(playing){ clearInterval(timer); timer = setInterval(step, msPerCol()); }
+    elLinkOut.value = makeFullLink(false);
+  });
+  elPlay.addEventListener('click', () => playing ? stop() : start());
+  elClear.addEventListener('click', () => { grid = makeGrid(rows, cols); refreshActiveClasses(); });
+
+  elSave.addEventListener('click', () => {
+    const full = makeFullLink(false);
+    elLinkOut.value = full;
+    // Schrijf naar hash voor directe deeplink
+    const h = encodeToHash();
+    const u = new URL(window.location.href);
+    u.hash = h;
+    history.replaceState(null, '', u);
+  });
+  elCopy.addEventListener('click', async () => {
+    const txt = elLinkOut.value || makeFullLink(false);
+    try{ await navigator.clipboard.writeText(txt); toast('Link gekopieerd'); }
+    catch{ fallbackCopy(txt); }
+  });
+
+  embedBtn.addEventListener('click', () => {
+    const full = makeFullLink(true);
+    const code = `<iframe src="${full}" width="900" height="520" style="border:0; border-radius:16px;" allow="autoplay"></iframe>`;
+    embedCode.value = code;
+    embedModal.showModal();
+  });
+  embedClose.addEventListener('click', ()=> embedModal.close());
+  copyEmbed.addEventListener('click', async ()=>{
+    try{ await navigator.clipboard.writeText(embedCode.value); toast('Embed gekopieerd'); }
+    catch{ fallbackCopy(embedCode.value); }
+  });
+
+  function makeFullLink(embedMode){
+    const base = window.location.origin + window.location.pathname;
+    const hash = encodeToHash();
+    // Voeg embed=1 toe
+    if(embedMode){
+      const usp = new URLSearchParams(hash.slice(1));
+      usp.set('embed','1');
+      return `${base}#${usp.toString()}`;
+    }
+    return `${base}${hash}`;
+  }
+  function fallbackCopy(text){
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); toast('Gekopieerd'); } catch{ alert('Kopiëren niet gelukt'); }
+    finally{ document.body.removeChild(ta); }
+  }
+  function toast(msg){
+    const t = document.createElement('div');
+    t.textContent = msg; t.style.position='fixed'; t.style.bottom='18px'; t.style.left='50%'; t.style.transform='translateX(-50%)';
+    t.style.background='rgba(15,23,42,.9)'; t.style.color='white'; t.style.padding='10px 14px'; t.style.borderRadius='12px'; t.style.boxShadow='0 8px 24px rgba(0,0,0,.3)'; t.style.zIndex='9999';
+    document.body.appendChild(t); setTimeout(()=> t.remove(), 1300);
+  }
+
+  // ====== Init ======
+  function init(){
+    // Defaults (1 maat, subdiv=2, bpm=100)
+    drawEverything();
+    // URL state inladen indien aanwezig
+    const loaded = decodeFromHash(location.hash);
+    if(!loaded){ elLinkOut.value = makeFullLink(false); }
+  }
+  window.addEventListener('hashchange', ()=> decodeFromHash(location.hash));
+  init();
+
+  // ====== Toetsenbord-trigger (optioneel leuk) ======
+  // Rijen 1..7 op toetsen: U I O P [ ] \  (of cijfers 1..7)
+  const keyMap = {
+    'Digit1': 6, 'Digit2':5, 'Digit3':4, 'Digit4':3, 'Digit5':2, 'Digit6':1, 'Digit7':0,
+    'KeyU': 6, 'KeyI':5, 'KeyO':4, 'KeyP':3, 'BracketLeft':2, 'BracketRight':1, 'Backslash':0,
+  };
+  window.addEventListener('keydown', (e)=>{
+    const r = keyMap[e.code];
+    if(r==null) return;
+    ensureAudio(); blip(SCALE[r].midi, ac.currentTime, .12);
+  });
+  </script>
+</body>
+</html>
