@@ -25,15 +25,11 @@
       padding:16px clamp(12px, 4vw, 28px);
       display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;
     }
-    .title{
-      display:flex; align-items:center; gap:12px;
-    }
+    .title{ display:flex; align-items:center; gap:12px; }
     .logo{width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,#60a5fa,#f472b6,#22c55e); box-shadow:0 6px 16px rgba(0,0,0,.12)}
     h1{font-size:clamp(18px, 2.6vw, 26px); margin:0}
 
-    .controls{
-      display:flex; flex-wrap:wrap; gap:10px; align-items:center;
-    }
+    .controls{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
     .control{background:white; border:1px solid var(--muted); border-radius:10px; padding:8px 10px; display:flex; align-items:center; gap:8px; box-shadow:0 2px 10px rgba(15,23,42,.06)}
     label{font-size:12px; opacity:.9}
     select, input[type="number"], input[type="text"], .btn { 
@@ -49,9 +45,7 @@
       background:white; margin:0 clamp(12px, 4vw, 28px) 24px; border:1px solid var(--muted); border-radius:var(--radius); overflow:hidden;
       box-shadow:0 20px 40px rgba(15,23,42,.07)
     }
-    .ruler{
-      display:grid; grid-template-columns: auto 1fr; align-items:center; border-bottom:1px dashed var(--muted); background:#f9fafb;
-    }
+    .ruler{ display:grid; grid-template-columns: auto 1fr; align-items:center; border-bottom:1px dashed var(--muted); background:#f9fafb; }
     .ruler .left { padding:10px 10px 10px 14px; font-size:12px; opacity:.7 }
     .ruler .ticks{ display:flex; gap:0; }
     .tick{ flex:1 0 auto; text-align:center; font-size:12px; padding:6px 0; border-left:1px dashed var(--muted) }
@@ -76,9 +70,7 @@
     .cell.active::after{ background:var(--active-color); opacity:1; box-shadow: 0 6px 16px rgba(0,0,0,.15) }
     .cell.playing::before{ content:""; position:absolute; inset:-1px; border-right: 3px solid var(--playhead); }
 
-    .footer{
-      padding:14px clamp(12px, 4vw, 28px) 24px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;
-    }
+    .footer{ padding:14px clamp(12px, 4vw, 28px) 24px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; }
     .linkbox{ display:flex; gap:8px; align-items:center; flex:1; min-width:260px }
     .linkbox input{ width:100% }
     .hint{ font-size:12px; opacity:.7 }
@@ -86,6 +78,14 @@
     /* Embed mode trims chrome */
     .embed header, .embed .footer .share, .embed .footer .hint { display:none }
     .embed .footer{ justify-content:center }
+
+    /* --- Embed start overlay (nodig voor Canva en autoplay policies) --- */
+    .start-overlay{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(248,250,252,.96); z-index:9999; }
+    .start-card{ background:white; border:1px solid var(--muted); border-radius:16px; padding:18px 20px; box-shadow:0 18px 40px rgba(15,23,42,.18); max-width:520px; text-align:center }
+    .start-card h2{ margin:0 0 6px 0; font-size:18px }
+    .start-card p{ margin:0 0 12px 0; opacity:.8 }
+    .start-card .btn{ padding:10px 16px }
+    .embed .start-overlay{ display:flex }
 
     @media (max-width: 680px){
       :root{ --cell-size: 36px }
@@ -142,6 +142,15 @@
       </div>
       <div class="hint">Tip: de link bevat alle gegevens (toonraster, tempo en onderverdeling). Je kunt hem rechtstreeks in Canva als embed gebruiken.</div>
     </div>
+
+    <!-- Start overlay voor embed (Canva) -->
+    <div id="startOverlay" class="start-overlay" aria-hidden="true">
+      <div class="start-card">
+        <h2>Klik om te starten</h2>
+        <p>Dit is een ingesloten versie. Klik op starten om audio in te schakelen.</p>
+        <button id="startBtn" class="btn">Start</button>
+      </div>
+    </div>
   </main>
 
   <!-- Eenvoudige modal voor embed-code -->
@@ -197,6 +206,9 @@
   const embedClose = document.getElementById('embedClose');
   const embedCode = document.getElementById('embedCode');
   const copyEmbed = document.getElementById('copyEmbed');
+
+  const startOverlay = document.getElementById('startOverlay');
+  const startBtn = document.getElementById('startBtn');
 
   // ====== Audio ======
   let ac;                 // AudioContext
@@ -309,9 +321,7 @@
   }
   function markPlayhead(col){
     const kids = elCells.children;
-    // Clear previous
     for(let i=0;i<kids.length;i++) kids[i].classList.remove('playing');
-    // Set new column
     for(let r=0; r<rows; r++){
       const idx = r*cols + col;
       const cell = kids[idx];
@@ -331,13 +341,11 @@
     elPlay.textContent = '▶︎ Afspelen';
     elPlay.setAttribute('aria-pressed','false');
     clearInterval(timer); timer = null;
-    // Clear playhead visuals
     const kids = elCells.children; for(let i=0;i<kids.length;i++) kids[i].classList.remove('playing');
   }
 
-  // ====== Link encoding ======
-  // We pakken het raster als bitstring -> bytes -> base64. Alle metadata in de hash.
-  function encodeToHash(){
+  // ====== Link & embed encoding (querystring-compatibel voor Canva) ======
+  function encodeStateParams(embedFlag){
     let bits = '';
     for(let r=0; r<rows; r++){
       for(let c=0; c<cols; c++) bits += grid[r][c] ? '1' : '0';
@@ -349,50 +357,55 @@
     }
     const bin = String.fromCharCode(...bytes);
     const b64 = btoa(bin);
-    const params = new URLSearchParams({ v:'1', sub: String(subdiv), beats: String(beats), tempo: String(bpm), data: b64 });
-    // embed=1 wordt apart gezet indien gewenst
-    return '#' + params.toString();
+    const usp = new URLSearchParams({ v:'1', sub:String(subdiv), beats:String(beats), tempo:String(bpm), data:b64 });
+    if(embedFlag) usp.set('embed','1');
+    return usp; // URLSearchParams
   }
-  function decodeFromHash(hash){
-    const h = (hash || location.hash || '').replace(/^#/,'');
-    if(!h) return false;
-    const u = new URLSearchParams(h);
-    const v = u.get('v'); if(v !== '1') {/* future-proof */}
-    subdiv = clamp(parseInt(u.get('sub')||'2',10),1,8);
-    bpm = clamp(parseInt(u.get('tempo')||'100',10),40,220);
-    const b64 = u.get('data');
-    const beatParam = parseInt(u.get('beats')||'4',10);
-    // rebuild grid to match incoming settings
-    const newCols = (beatParam * subdiv);
-    cols = newCols; // keep local in sync
+  function decodeStateFromURL(){
+    // 1) Querystring (voorkeur, werkt in Canva)
+    let usp = new URLSearchParams(location.search);
+    if(!usp || (!usp.get('v') && !usp.get('data') && !usp.get('sub') && !usp.get('tempo'))){
+      // 2) Backwards-compat: hash
+      const h = (location.hash||'').replace(/^#/,'');
+      if(h) usp = new URLSearchParams(h);
+    }
+    if(!usp || !usp.toString()) return false;
+
+    const v = usp.get('v'); /* future-proof */
+    subdiv = clamp(parseInt(usp.get('sub')||'2',10),1,8);
+    bpm = clamp(parseInt(usp.get('tempo')||'100',10),40,220);
+    const beatParam = parseInt(usp.get('beats')||'4',10);
+    const b64 = usp.get('data');
+
+    cols = beatParam * subdiv;
     grid = makeGrid(rows, cols);
 
     if(b64){
       try{
         const bin = atob(b64);
         let bits = '';
-        for(let i=0;i<bin.length;i++){
-          const byte = bin.charCodeAt(i);
-          bits += byte.toString(2).padStart(8,'0');
-        }
-        // fill grid with available bits
+        for(let i=0;i<bin.length;i++) bits += bin.charCodeAt(i).toString(2).padStart(8,'0');
         let k=0;
         for(let r=0; r<rows; r++){
-          for(let c=0; c<cols; c++){
-            grid[r][c] = bits[k++] === '1';
-          }
+          for(let c=0; c<cols; c++) grid[r][c] = bits[k++] === '1';
         }
-      }catch(e){ console.warn('Kon link niet decoderen:', e); }
+      }catch(e){ console.warn('Kon link niet decoderen (query/hash):', e); }
     }
 
-    // reflect UI
     elSubdiv.value = String(subdiv);
     elTempo.value = String(bpm);
     elTempoVal.textContent = bpm + ' BPM';
     drawEverything();
-    if(u.get('embed') === '1') document.body.classList.add('embed');
+
+    if(usp.get('embed') === '1') document.body.classList.add('embed');
     else document.body.classList.remove('embed');
+
     return true;
+  }
+  function makeFullLink(embedMode){
+    const base = window.location.origin + window.location.pathname;
+    const usp = encodeStateParams(embedMode);
+    return `${base}?${usp.toString()}`;
   }
   function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
 
@@ -401,7 +414,6 @@
     const newSub = parseInt(elSubdiv.value,10);
     const oldCols = cols;
     subdiv = newSub; cols = beats * subdiv;
-    // Probeer bestaand patroon redelijk te schalen naar nieuwe kolommen
     const newGrid = makeGrid(rows, cols);
     for(let r=0; r<rows; r++){
       for(let c=0; c<oldCols; c++){
@@ -414,7 +426,6 @@
     grid = newGrid;
     drawEverything();
     if(playing){ clearInterval(timer); timer = setInterval(step, msPerCol()); }
-    // update link preview live
     elLinkOut.value = makeFullLink(false);
   });
   elTempo.addEventListener('input', () => {
@@ -429,10 +440,10 @@
   elSave.addEventListener('click', () => {
     const full = makeFullLink(false);
     elLinkOut.value = full;
-    // Schrijf naar hash voor directe deeplink
-    const h = encodeToHash();
+    // Schrijf naar querystring voor directe deeplink (Canva-proof)
     const u = new URL(window.location.href);
-    u.hash = h;
+    u.search = encodeStateParams(false).toString();
+    u.hash = '';
     history.replaceState(null, '', u);
   });
   elCopy.addEventListener('click', async () => {
@@ -442,7 +453,7 @@
   });
 
   embedBtn.addEventListener('click', () => {
-    const full = makeFullLink(true);
+    const full = makeFullLink(true); // met ?embed=1
     const code = `<iframe src="${full}" width="900" height="520" style="border:0; border-radius:16px;" allow="autoplay"></iframe>`;
     embedCode.value = code;
     embedModal.showModal();
@@ -453,17 +464,6 @@
     catch{ fallbackCopy(embedCode.value); }
   });
 
-  function makeFullLink(embedMode){
-    const base = window.location.origin + window.location.pathname;
-    const hash = encodeToHash();
-    // Voeg embed=1 toe
-    if(embedMode){
-      const usp = new URLSearchParams(hash.slice(1));
-      usp.set('embed','1');
-      return `${base}#${usp.toString()}`;
-    }
-    return `${base}${hash}`;
-  }
   function fallbackCopy(text){
     const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
     try{ document.execCommand('copy'); toast('Gekopieerd'); } catch{ alert('Kopiëren niet gelukt'); }
@@ -478,17 +478,18 @@
 
   // ====== Init ======
   function init(){
-    // Defaults (1 maat, subdiv=2, bpm=100)
     drawEverything();
-    // URL state inladen indien aanwezig
-    const loaded = decodeFromHash(location.hash);
+    const loaded = decodeStateFromURL();
     if(!loaded){ elLinkOut.value = makeFullLink(false); }
+    if(document.body.classList.contains('embed')){
+      startOverlay.style.display = 'flex';
+    }
   }
-  window.addEventListener('hashchange', ()=> decodeFromHash(location.hash));
+  window.addEventListener('popstate', ()=> decodeStateFromURL());
+  window.addEventListener('hashchange', ()=> decodeStateFromURL());
   init();
 
   // ====== Toetsenbord-trigger (optioneel leuk) ======
-  // Rijen 1..7 op toetsen: U I O P [ ] \  (of cijfers 1..7)
   const keyMap = {
     'Digit1': 6, 'Digit2':5, 'Digit3':4, 'Digit4':3, 'Digit5':2, 'Digit6':1, 'Digit7':0,
     'KeyU': 6, 'KeyI':5, 'KeyO':4, 'KeyP':3, 'BracketLeft':2, 'BracketRight':1, 'Backslash':0,
@@ -496,8 +497,17 @@
   window.addEventListener('keydown', (e)=>{
     const r = keyMap[e.code];
     if(r==null) return;
-    ensureAudio(); blip(SCALE[r].midi, ac.currentTime, .12);
+    ensureAudio(); blip(SCALE[r].midi, ac?.currentTime||0, .12);
   });
+
+  // ====== Start overlay handlers (voor Canva) ======
+  if(startBtn){
+    startBtn.addEventListener('click', async ()=>{
+      ensureAudio();
+      try{ await ac.resume(); }catch{}
+      startOverlay.style.display='none';
+    });
+  }
   </script>
 </body>
 </html>
