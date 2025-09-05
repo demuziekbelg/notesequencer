@@ -203,9 +203,13 @@
   const elCopy = document.getElementById('copy');
   const embedBtn = document.getElementById('embedBtn');
   const embedModal = document.getElementById('embedModal');
-  const embedClose = document.getElementById('embedClose');
-  const embedCode = document.getElementById('embedCode');
-  const copyEmbed = document.getElementById('copyEmbed');
+const embedClose = document.getElementById('embedClose');
+const embedCode = document.getElementById('embedCode');
+const copyEmbed = document.getElementById('copyEmbed');
+
+// Detect iframe/Canva => force embed chrome off
+let inIframe = false;
+try{ inIframe = window.self !== window.top; }catch{ inIframe = true; }
 
   const startOverlay = document.getElementById('startOverlay');
   const startBtn = document.getElementById('startBtn');
@@ -356,8 +360,9 @@
       bytes.push(parseInt(chunk,2));
     }
     const bin = String.fromCharCode(...bytes);
-    const b64 = btoa(bin);
-    const usp = new URLSearchParams({ v:'1', sub:String(subdiv), beats:String(beats), tempo:String(bpm), data:b64 });
+    // URL-veilige base64
+    const b64 = btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    const usp = new URLSearchParams({ v:'1', sub:String(subdiv), beats:String(beats), tempo:String(bpm), s:b64 });
     if(embedFlag) usp.set('embed','1');
     return usp; // URLSearchParams
   }
@@ -375,14 +380,15 @@
     subdiv = clamp(parseInt(usp.get('sub')||'2',10),1,8);
     bpm = clamp(parseInt(usp.get('tempo')||'100',10),40,220);
     const beatParam = parseInt(usp.get('beats')||'4',10);
-    const b64 = usp.get('data');
+    let b64 = usp.get('s') || usp.get('data');
 
     cols = beatParam * subdiv;
     grid = makeGrid(rows, cols);
 
     if(b64){
       try{
-        const bin = atob(b64);
+        const b64pad = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+        const bin = atob(b64pad.replace(/-/g,'+').replace(/_/g,'/'));
         let bits = '';
         for(let i=0;i<bin.length;i++) bits += bin.charCodeAt(i).toString(2).padStart(8,'0');
         let k=0;
@@ -481,7 +487,8 @@
     drawEverything();
     const loaded = decodeStateFromURL();
     if(!loaded){ elLinkOut.value = makeFullLink(false); }
-    if(document.body.classList.contains('embed')){
+    if(document.body.classList.contains('embed') || inIframe){
+      document.body.classList.add('embed');
       startOverlay.style.display = 'flex';
     }
   }
